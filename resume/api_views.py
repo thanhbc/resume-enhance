@@ -107,6 +107,28 @@ class ResumeViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+def _coerce_rating(value):
+    """Return an int 1-5, or None when no rating was given.
+
+    Accepts ints, int()-coercible strings ("4"), and whole-number floats
+    (4.0 — common JSON serializer output). Raises ValueError for anything
+    else, including bools (an int subclass) and out-of-range values.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError
+        value = int(value)
+    elif isinstance(value, str):
+        value = int(value)
+    if not isinstance(value, int) or value not in range(1, 6):
+        raise ValueError
+    return value
+
+
 @require_http_methods(["POST"])
 def submit_feedback(request):
     """Submit user feedback. Auth optional."""
@@ -115,14 +137,18 @@ def submit_feedback(request):
         message = data.get("message", "").strip()
         if not message:
             return JsonResponse({"error": "Message is required"}, status=400)
-        rating = data.get("rating")
+        try:
+            rating = _coerce_rating(data.get("rating"))
+        except ValueError:
+            return JsonResponse(
+                {"error": "Rating must be a whole number between 1 and 5"},
+                status=400,
+            )
         page = data.get("page", "")
         Feedback.objects.create(
             user=request.user if request.user.is_authenticated else None,
             message=message[:2000],
-            rating=rating
-            if isinstance(rating, int) and rating in range(1, 6)
-            else None,
+            rating=rating,
             page=page[:100],
         )
         return JsonResponse({"success": True})
